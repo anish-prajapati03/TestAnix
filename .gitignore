@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+chroma_db/
 
 # Virtual environments
 venv/
