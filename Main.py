@@ -20,6 +20,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # ----------------------------------------------------------------------------
 # Styling
 # ----------------------------------------------------------------------------
@@ -36,7 +37,6 @@ st.markdown(
     }
     .block-container { padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1400px; }
     h1, h2, h3 { color: var(--ink); letter-spacing: -0.01em; }
-
     .hero {
         background: linear-gradient(120deg, #0a5c5b 0%, #0e7c7b 60%, #2a9d8f 100%);
         border-radius: 14px;
@@ -46,7 +46,6 @@ st.markdown(
     }
     .hero h1 { color: #fff; margin: 0; font-size: 2.1rem; }
     .hero p { margin: 6px 0 0; font-size: 1.02rem; opacity: .92; }
-
     .step-row { display: flex; gap: 10px; margin: 0 0 1.2rem; flex-wrap: wrap; }
     .step {
         flex: 1; min-width: 140px; padding: 10px 14px; border-radius: 10px;
@@ -55,13 +54,11 @@ st.markdown(
     .step b { color: var(--ink); display: block; font-size: .92rem; }
     .step.done { background: var(--mint); border-color: #b7dcd5; }
     .step.done b { color: var(--teal-dark); }
-
     div[data-testid="stMetric"] {
         background: #fff; border: 1px solid var(--line);
         border-radius: 12px; padding: 14px 18px;
     }
     div[data-testid="stMetricLabel"] { color: var(--muted); }
-
     .stButton > button[kind="primary"], .stDownloadButton > button {
         border-radius: 10px; font-weight: 600;
     }
@@ -80,7 +77,8 @@ def result_to_dataframe(result) -> pd.DataFrame:
     for case in result.test_cases:
         steps = case.test_steps
         if isinstance(steps, (list, tuple)):
-            steps = "\n".join(f"{i}. {s}" for i, s in enumerate(steps, 1))
+            steps = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
+
         rows.append(
             {
                 "Test ID": case.test_id,
@@ -94,20 +92,26 @@ def result_to_dataframe(result) -> pd.DataFrame:
                 "Priority": case.priority,
             }
         )
+
     return pd.DataFrame(rows)
 
 
 def build_excel(df: pd.DataFrame, ambiguities: list) -> bytes:
-    """Create a formatted .xlsx with a Test Cases sheet and an Ambiguities sheet."""
+    """Create a formatted Excel workbook with test cases and ambiguities."""
     buffer = io.BytesIO()
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Test Cases")
-        amb_df = pd.DataFrame(
-            {"#": range(1, len(ambiguities) + 1), "Ambiguity": ambiguities}
-        )
-        amb_df.to_excel(writer, index=False, sheet_name="Ambiguities")
 
-        from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+        ambiguity_df = pd.DataFrame(
+            {
+                "#": range(1, len(ambiguities) + 1),
+                "Ambiguity": ambiguities,
+            }
+        )
+        ambiguity_df.to_excel(writer, index=False, sheet_name="Ambiguities")
+
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
         header_fill = PatternFill("solid", fgColor="0E7C7B")
         header_font = Font(bold=True, color="FFFFFF")
@@ -115,43 +119,76 @@ def build_excel(df: pd.DataFrame, ambiguities: list) -> bytes:
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
         widths = {
-            "Test ID": 12, "Scenario": 34, "Objective": 38, "Test Type": 14,
-            "Preconditions": 30, "Test Steps": 50, "Test Data": 28,
-            "Expected Result": 38, "Priority": 11,
+            "Test ID": 12,
+            "Scenario": 34,
+            "Objective": 38,
+            "Test Type": 14,
+            "Preconditions": 30,
+            "Test Steps": 50,
+            "Test Data": 28,
+            "Expected Result": 38,
+            "Priority": 11,
+            "Ambiguity": 90,
         }
 
-        for ws in writer.book.worksheets:
-            ws.freeze_panes = "A2"
-            for cell in ws[1]:
+        for worksheet in writer.book.worksheets:
+            worksheet.freeze_panes = "A2"
+
+            for cell in worksheet[1]:
                 cell.fill = header_fill
                 cell.font = header_font
-                cell.alignment = Alignment(vertical="center", horizontal="center")
-            for row in ws.iter_rows(min_row=2):
+                cell.alignment = Alignment(
+                    vertical="center",
+                    horizontal="center",
+                )
+
+            for row in worksheet.iter_rows(min_row=2):
                 for cell in row:
                     cell.alignment = Alignment(wrap_text=True, vertical="top")
                     cell.border = border
-            for col_cells in ws.columns:
-                header = col_cells[0].value
-                letter = col_cells[0].column_letter
-                ws.column_dimensions[letter].width = widths.get(
-                    header, 90 if header == "Ambiguity" else 8
-                )
-            ws.auto_filter.ref = ws.dimensions
+
+            for column_cells in worksheet.columns:
+                header = column_cells[0].value
+                column_letter = column_cells[0].column_letter
+                worksheet.column_dimensions[column_letter].width = widths.get(header, 15)
+
+            worksheet.auto_filter.ref = worksheet.dimensions
+
     return buffer.getvalue()
 
 
-def steps_html(active: int) -> str:
-    labels = [
-        ("Upload", "PDF requirements"),
-        ("Process", "Extract and chunk"),
-        ("Index", "Vector database"),
-        ("Generate", "AI test cases"),
-        ("Export", "CSV and Excel"),
-    ]
+def steps_html(active: int, mode: str = "") -> str:
+    """Build the progress indicator for either generation mode."""
+    if mode == "PDF":
+        labels = [
+            ("Input", "PDF + prompt"),
+            ("Extract", "Read requirements"),
+            ("Index", "Create vector store"),
+            ("Generate", "AI test cases"),
+            ("Export", "CSV and Excel"),
+        ]
+    elif mode == "Prompt-only":
+        labels = [
+            ("Input", "Prompt only"),
+            ("Prepare", "Feature description"),
+            ("Context", "Direct prompt"),
+            ("Generate", "AI test cases"),
+            ("Export", "CSV and Excel"),
+        ]
+    else:
+        labels = [
+            ("Input", "PDF or prompt"),
+            ("Extract", "Prepare requirements"),
+            ("Context", "Build context"),
+            ("Generate", "AI test cases"),
+            ("Export", "CSV and Excel"),
+        ]
+
     html = '<div class="step-row">'
-    for i, (title, sub) in enumerate(labels):
-        cls = "step done" if i < active else "step"
-        html += f'<div class="{cls}"><b>{title}</b>{sub}</div>'
+    for index, (title, subtitle) in enumerate(labels):
+        css_class = "step done" if index < active else "step"
+        html += f'<div class="{css_class}"><b>{title}</b>{subtitle}</div>'
+
     return html + "</div>"
 
 
@@ -163,6 +200,7 @@ for key, default in {
     "df": None,
     "stats": {},
     "filename": None,
+    "source_mode": None,
 }.items():
     st.session_state.setdefault(key, default)
 
@@ -176,7 +214,12 @@ with st.sidebar:
     st.divider()
 
     uploaded_file = st.file_uploader(
-        "Requirement document", type=["pdf"], help="Upload a software requirement PDF."
+        "Requirement PDF (Optional)",
+        type=["pdf"],
+        help=(
+            "Upload a requirement PDF, or leave this empty to generate "
+            "test cases directly from your prompt."
+        ),
     )
 
     st.markdown("**Test coverage**")
@@ -189,22 +232,38 @@ with st.sidebar:
 
     user_request = st.text_area(
         "Test generation request",
-        value="Generate test cases for login functionality.\nInclude positive, negative and boundary scenarios.",
-        height=130,
-        help="Describe the functionality and scenarios you want TestAnix to cover.",
+        value=(
+            "Generate 10 to 15 test cases for login functionality.\n"
+            "Include positive, negative and boundary scenarios."
+        ),
+        height=150,
+        help=(
+            "Describe the feature and scenarios. You can use this prompt "
+            "with or without uploading a PDF."
+        ),
     )
 
-    generate = st.button("Generate test cases", type="primary", use_container_width=True)
+    generate = st.button(
+        "Generate test cases",
+        type="primary",
+        use_container_width=True,
+    )
 
     st.divider()
     with st.expander("How it works"):
         st.markdown(
+            "**With PDF**\n"
             "1. PDF is read page by page\n"
-            "2. Text is split into 1000-character chunks (200 overlap)\n"
+            "2. Text is split into chunks\n"
             "3. Chunks are embedded and stored in ChromaDB\n"
-            "4. The 4 most relevant chunks are retrieved\n"
-            "5. Groq LLM writes structured test cases\n"
-            "6. Output is validated and ready to export"
+            "4. Relevant requirements are retrieved\n\n"
+            "**Without PDF**\n"
+            "1. Your prompt is used as the requirement description\n"
+            "2. No PDF processing or vector database is needed\n\n"
+            "**Both modes**\n"
+            "1. Groq generates structured test cases\n"
+            "2. Pydantic validates the output\n"
+            "3. Results can be exported to CSV or Excel"
         )
 
 
@@ -215,7 +274,7 @@ st.markdown(
     """
     <div class="hero">
         <h1>TestAnix</h1>
-        <p>Turn requirement documents into structured, export-ready test cases.</p>
+        <p>Turn requirement documents or feature descriptions into structured, export-ready test cases.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -225,61 +284,144 @@ progress_slot = st.empty()
 
 
 # ----------------------------------------------------------------------------
-# Generation pipeline
+# Generation pipeline: PDF mode or prompt-only mode
 # ----------------------------------------------------------------------------
 if generate:
-    if uploaded_file is None:
-        st.error("Upload a requirement PDF in the sidebar to continue.")
-    elif not user_request.strip():
-        st.error("Please enter your test generation request.")
+    if not user_request.strip():
+        st.error("Please enter a feature description or test generation request.")
+    elif not coverage:
+        st.error("Please select at least one test type.")
     else:
+        # Clear old results so failed new generations do not show stale output.
+        st.session_state.result = None
+        st.session_state.df = None
+        st.session_state.stats = {}
+        st.session_state.filename = None
+        st.session_state.source_mode = None
+
         selected_types = ", ".join(coverage)
+        mode = "PDF" if uploaded_file is not None else "Prompt-only"
+
         final_request = f"""
-User Request:
-{user_request}
+USER REQUEST:
+{user_request.strip()}
 
-Selected Test Types:
-{selected_types if selected_types else "All applicable test types"}
+SELECTED TEST TYPES:
+{selected_types}
 
-Generate 10 to 15 test cases for each individual feature
-identified in the uploaded requirements document.
+GENERATION TARGET:
+Generate approximately 10 to 15 meaningful test cases for each
+individual feature when the available requirements support that level
+of coverage. Do not force unnecessary or duplicate cases just to reach
+this number. Do not limit the entire document to 10 to 15 cases.
 
-Do not limit the entire document to 10 to 15 test cases.
+SOURCE MODE:
+{mode}
+
+Use the supplied requirement context and user request. Report unclear
+or missing business rules as ambiguities instead of inventing them.
 """
 
         try:
-            progress_slot.markdown(steps_html(1), unsafe_allow_html=True)
+            progress_slot.markdown(
+                steps_html(1, mode),
+                unsafe_allow_html=True,
+            )
+
             with st.status("Running TestAnix pipeline...", expanded=True) as status:
-                st.write("Extracting PDF requirements...")
-                documents = load_pdf(uploaded_file)
-                st.write(f"Extracted {len(documents)} pages.")
+                # ------------------------------------------------------------
+                # MODE 1: PDF uploaded
+                # ------------------------------------------------------------
+                if uploaded_file is not None:
+                    st.write("PDF detected. Extracting requirements...")
+                    documents = load_pdf(uploaded_file)
 
-                progress_slot.markdown(steps_html(2), unsafe_allow_html=True)
-                st.write("Splitting requirements into chunks...")
-                chunks = split_documents(documents)
-                st.write(f"Created {len(chunks)} chunks.")
+                    if not documents:
+                        raise ValueError("No readable content was found in the PDF.")
 
-                progress_slot.markdown(steps_html(3), unsafe_allow_html=True)
-                st.write("Building vector database...")
-                vectorstore = create_vectorstore(chunks)
-                retriever = get_retriever(vectorstore)
+                    st.write(f"Extracted {len(documents)} pages.")
 
-                progress_slot.markdown(steps_html(4), unsafe_allow_html=True)
-                st.write("Generating test cases with AI...")
-                result = generate_test_cases(retriever, final_request)
+                    progress_slot.markdown(
+                        steps_html(2, mode),
+                        unsafe_allow_html=True,
+                    )
+                    st.write("Splitting requirements into chunks...")
+                    chunks = split_documents(documents)
 
-                status.update(label="Test cases generated", state="complete", expanded=False)
+                    if not chunks:
+                        raise ValueError("No text chunks could be created from the PDF.")
 
+                    st.write(f"Created {len(chunks)} chunks.")
+
+                    progress_slot.markdown(
+                        steps_html(3, mode),
+                        unsafe_allow_html=True,
+                    )
+                    st.write("Building vector database...")
+                    vectorstore = create_vectorstore(chunks)
+                    retriever = get_retriever(vectorstore)
+
+                    filename = uploaded_file.name
+                    stats = {
+                        "pages": len(documents),
+                        "chunks": len(chunks),
+                        "source": "PDF + prompt",
+                    }
+
+                # ------------------------------------------------------------
+                # MODE 2: No PDF; use the user's prompt directly
+                # ------------------------------------------------------------
+                else:
+                    st.write("No PDF uploaded. Using your prompt as the requirement source...")
+                    retriever = None
+                    filename = "Prompt_Only"
+                    stats = {
+                        "pages": 0,
+                        "chunks": 0,
+                        "source": "Prompt only",
+                    }
+
+                # ------------------------------------------------------------
+                # COMMON GENERATION: both modes use the same Groq agent
+                # ------------------------------------------------------------
+                progress_slot.markdown(
+                    steps_html(4, mode),
+                    unsafe_allow_html=True,
+                )
+                st.write("Generating structured test cases with Groq AI...")
+
+                result = generate_test_cases(
+                    retriever=retriever,
+                    user_request=final_request,
+                )
+
+                if not result.test_cases:
+                    raise ValueError(
+                        "The AI did not return any test cases. Try a more detailed prompt."
+                    )
+
+                status.update(
+                    label="Test cases generated successfully",
+                    state="complete",
+                    expanded=False,
+                )
+
+            # Save results in Streamlit session state.
             df = result_to_dataframe(result)
             st.session_state.result = result
             st.session_state.df = df
-            st.session_state.filename = uploaded_file.name
-            st.session_state.stats = {"pages": len(documents), "chunks": len(chunks)}
-            progress_slot.markdown(steps_html(5), unsafe_allow_html=True)
+            st.session_state.filename = filename
+            st.session_state.stats = stats
+            st.session_state.source_mode = mode
+
+            progress_slot.markdown(
+                steps_html(5, mode),
+                unsafe_allow_html=True,
+            )
             st.toast("Test cases are ready to export.", icon="✅")
 
-        except Exception as e:
-            st.error(f"Generation failed: {e}")
+        except Exception as error:
+            st.error(f"Generation failed: {error}")
 
 
 # ----------------------------------------------------------------------------
@@ -289,42 +431,68 @@ result = st.session_state.result
 df = st.session_state.df
 
 if result is None or df is None or df.empty:
-    progress_slot.markdown(steps_html(1 if uploaded_file else 0), unsafe_allow_html=True)
-    st.info(
-        "Upload a requirement PDF, choose the coverage you need, then select "
-        "**Generate test cases** in the sidebar."
+    current_mode = "PDF" if uploaded_file is not None else "Prompt-only"
+    progress_slot.markdown(
+        steps_html(0, current_mode),
+        unsafe_allow_html=True,
     )
+    st.info(
+        "Enter a feature description in the sidebar. Upload a requirement PDF "
+        "if you want TestAnix to use document-based requirements, or leave it "
+        "empty to generate from your prompt alone."
+    )
+
 else:
     stats = st.session_state.stats
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Test cases", len(df))
-    m2.metric("High priority", int((df["Priority"].astype(str).str.lower() == "high").sum()))
-    m3.metric("Pages read", stats.get("pages", "-"))
-    m4.metric("Ambiguities", len(result.ambiguities or []))
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("Test cases", len(df))
+    metric2.metric(
+        "High priority",
+        int((df["Priority"].astype(str).str.lower() == "high").sum()),
+    )
+    metric3.metric("Generation mode", stats.get("source", "-"))
+    metric4.metric("Ambiguities", len(result.ambiguities or []))
 
-    tab_cases, tab_charts, tab_amb = st.tabs(
+    tab_cases, tab_charts, tab_ambiguities = st.tabs(
         ["Test cases", "Coverage summary", "Requirement ambiguities"]
     )
 
-    # ---- Test cases tab
+    # ------------------------------------------------------------------------
+    # Test cases tab
+    # ------------------------------------------------------------------------
     with tab_cases:
-        f1, f2, f3 = st.columns([2, 1, 1])
-        search = f1.text_input("Search", placeholder="Search scenario, objective or ID")
-        types = sorted(df["Test Type"].astype(str).unique())
-        prios = sorted(df["Priority"].astype(str).unique())
-        sel_types = f2.multiselect("Test type", types, default=types)
-        sel_prios = f3.multiselect("Priority", prios, default=prios)
+        filter1, filter2, filter3 = st.columns([2, 1, 1])
+        search = filter1.text_input(
+            "Search",
+            placeholder="Search scenario, objective or ID",
+        )
+
+        available_types = sorted(df["Test Type"].astype(str).unique())
+        available_priorities = sorted(df["Priority"].astype(str).unique())
+
+        selected_filter_types = filter2.multiselect(
+            "Test type",
+            available_types,
+            default=available_types,
+        )
+        selected_filter_priorities = filter3.multiselect(
+            "Priority",
+            available_priorities,
+            default=available_priorities,
+        )
 
         view = df[
-            df["Test Type"].astype(str).isin(sel_types)
-            & df["Priority"].astype(str).isin(sel_prios)
+            df["Test Type"].astype(str).isin(selected_filter_types)
+            & df["Priority"].astype(str).isin(selected_filter_priorities)
         ]
+
         if search.strip():
-            mask = view.apply(
-                lambda r: search.lower() in " ".join(map(str, r.values)).lower(), axis=1
+            search_mask = view.apply(
+                lambda row: search.lower() in " ".join(map(str, row.values)).lower(),
+                axis=1,
             )
-            view = view[mask]
+            view = view[search_mask]
 
         st.caption(f"Showing {len(view)} of {len(df)} test cases")
         st.dataframe(
@@ -340,59 +508,79 @@ else:
         )
 
         with st.expander("Read a single test case"):
-            pick = st.selectbox("Test ID", view["Test ID"].tolist() if len(view) else [])
-            if pick:
-                row = view[view["Test ID"] == pick].iloc[0]
-                c1, c2 = st.columns(2)
-                c1.markdown(f"**Scenario**\n\n{row['Scenario']}")
-                c1.markdown(f"**Objective**\n\n{row['Objective']}")
-                c1.markdown(f"**Preconditions**\n\n{row['Preconditions']}")
-                c2.markdown(f"**Test steps**\n\n{row['Test Steps']}")
-                c2.markdown(f"**Test data**\n\n{row['Test Data']}")
-                c2.markdown(f"**Expected result**\n\n{row['Expected Result']}")
+            available_ids = view["Test ID"].tolist() if not view.empty else []
+            if available_ids:
+                selected_id = st.selectbox("Test ID", available_ids)
+                selected_row = view[view["Test ID"] == selected_id].iloc[0]
 
-    # ---- Charts tab
+                column1, column2 = st.columns(2)
+                column1.markdown(f"**Scenario**\n\n{selected_row['Scenario']}")
+                column1.markdown(f"**Objective**\n\n{selected_row['Objective']}")
+                column1.markdown(f"**Preconditions**\n\n{selected_row['Preconditions']}")
+                column2.markdown(f"**Test steps**\n\n{selected_row['Test Steps']}")
+                column2.markdown(f"**Test data**\n\n{selected_row['Test Data']}")
+                column2.markdown(f"**Expected result**\n\n{selected_row['Expected Result']}")
+            else:
+                st.info("No test cases match the selected filters.")
+
+    # ------------------------------------------------------------------------
+    # Coverage charts tab
+    # ------------------------------------------------------------------------
     with tab_charts:
-        c1, c2 = st.columns(2)
-        with c1:
+        chart1, chart2 = st.columns(2)
+
+        with chart1:
             st.markdown("**By test type**")
             st.bar_chart(df["Test Type"].value_counts(), color="#0e7c7b")
-        with c2:
+
+        with chart2:
             st.markdown("**By priority**")
             st.bar_chart(df["Priority"].value_counts(), color="#2a9d8f")
 
-    # ---- Ambiguities tab
-    with tab_amb:
+    # ------------------------------------------------------------------------
+    # Ambiguities tab
+    # ------------------------------------------------------------------------
+    with tab_ambiguities:
         if result.ambiguities:
-            st.caption("Clarify these points with your product owner before testing.")
-            for i, issue in enumerate(result.ambiguities, 1):
-                st.warning(f"**{i}.** {issue}")
+            st.caption(
+                "Clarify these points with your product owner before testing."
+            )
+            for index, issue in enumerate(result.ambiguities, 1):
+                st.warning(f"**{index}.** {issue}")
         else:
-            st.success("No ambiguities were reported for this document.")
+            st.success("No ambiguities were reported for this request.")
 
-    # ---- Export
+    # ------------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------------
     st.divider()
     st.subheader("Export")
+
     base = (st.session_state.filename or "requirements").rsplit(".", 1)[0]
-    stamp = datetime.now().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
     csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
-    xlsx_bytes = build_excel(df, list(result.ambiguities or []))
+    excel_bytes = build_excel(df, list(result.ambiguities or []))
 
-    d1, d2, _ = st.columns([1, 1, 2])
-    d1.download_button(
+    download1, download2, _ = st.columns([1, 1, 2])
+
+    download1.download_button(
         "Download CSV",
         data=csv_bytes,
-        file_name=f"TestAnix_{base}_{stamp}.csv",
+        file_name=f"TestAnix_{base}_{timestamp}.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    d2.download_button(
+
+    download2.download_button(
         "Download Excel",
-        data=xlsx_bytes,
-        file_name=f"TestAnix_{base}_{stamp}.xlsx",
+        data=excel_bytes,
+        file_name=f"TestAnix_{base}_{timestamp}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
         use_container_width=True,
     )
-    st.caption("The Excel file includes a Test Cases sheet and an Ambiguities sheet.")
+
+    st.caption(
+        "The Excel file includes a Test Cases sheet and an Ambiguities sheet."
+    )
