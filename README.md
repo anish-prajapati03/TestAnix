@@ -1,5 +1,4 @@
 # 🧪 TestAnix – AI-Powered QA Testing Agent
-##Live: testanix.streamlit.app/
 
 **Generate professional software test cases using AI from PDF requirements or simple text prompts.**
 
